@@ -9,6 +9,15 @@ import NameStone, {
     TextRecords,
 } from "@namestone/namestone-sdk";
 import { sepolia } from 'viem/chains';
+import {
+    handleEthReceived,
+    depositToIntMax,
+    loginToIntMax,
+    getIntMaxBalances,
+    getDepositHistory,
+    getTransferHistory,
+    getDerivedAddress
+} from './intmax-helper';
 
 
 // Load environment variables
@@ -108,8 +117,18 @@ async function updateMonitoredAddresses() {
         });
 
         monitoredAddresses = response.map(nameData => nameData.address.toLowerCase());
-        console.log('📡 Updated monitored addresses:', monitoredAddresses);
-        console.log(`📡 Monitoring ${monitoredAddresses.length} addresses for ETH transfers`);
+
+        console.log('\n📡 UPDATED MONITORED ADDRESSES:');
+        console.log(`📡 Monitoring ${response.length} addresses for ETH transfers`);
+
+        response.forEach((nameData, index) => {
+            console.log(`\n${index + 1}. ${nameData.name}.${mainDomain}`);
+            console.log(`   📍 Ethereum Address: ${nameData.address}`);
+            console.log(`   🌐 INTMAX Address: ${nameData.text_records?.description || 'Not set'}`);
+            console.log(`   🔗 Etherscan: https://sepolia.etherscan.io/address/${nameData.address}`);
+        });
+
+        console.log(`\n📡 Raw monitored addresses: ${monitoredAddresses.join(', ')}`);
     } catch (error) {
         console.error('Error updating monitored addresses:', error);
     }
@@ -132,22 +151,30 @@ function checkTransactionForMonitoredAddresses(tx: any) {
     return null;
 }
 
-// Function to find name for address
-async function findNameForAddress(address: string): Promise<string | null> {
+// Function to find name and intmax address for ethereum address
+async function findNameAndIntMaxForAddress(address: string): Promise<{ name: string; intmax_address: string } | null> {
     try {
         const response: NameData[] = await ns.getNames({ domain: mainDomain });
         const nameData = response.find(n => n.address.toLowerCase() === address.toLowerCase());
-        return nameData ? nameData.name : null;
+
+        if (nameData && nameData.text_records && nameData.text_records.description) {
+            return {
+                name: nameData.name,
+                intmax_address: nameData.text_records.description
+            };
+        }
+
+        return null;
     } catch (error) {
-        console.error('Error finding name for address:', error);
+        console.error('Error finding name and intmax address for address:', error);
         return null;
     }
 }
 
-// Function to log ETH received
+// Function to log ETH received and initiate INTMAX deposit
 async function logEthReceived(tx: any, ethAmount: string) {
-    const name = await findNameForAddress(tx.to);
-    const subdomain = name ? `${name}.${mainDomain}` : tx.to;
+    const nameAndIntMax = await findNameAndIntMaxForAddress(tx.to);
+    const subdomain = nameAndIntMax ? `${nameAndIntMax.name}.${mainDomain}` : tx.to;
 
     console.log(`\n💰 ETH RECEIVED!`);
     console.log(`   📛 Name: ${subdomain}`);
@@ -157,6 +184,25 @@ async function logEthReceived(tx: any, ethAmount: string) {
     console.log(`   🔗 Tx Hash: ${tx.hash}`);
     console.log(`   📦 Block: ${tx.blockNumber}`);
     console.log(`   🌐 Etherscan: https://sepolia.etherscan.io/tx/${tx.hash}\n`);
+
+    // If we have a name and intmax address, initiate new ETH received flow
+    if (nameAndIntMax) {
+        console.log(`🚀 Initiating ETH received flow for ${nameAndIntMax.name}...`);
+        console.log(`   🎯 User INTMAX Address: ${nameAndIntMax.intmax_address}`);
+        try {
+            const result = await handleEthReceived(nameAndIntMax.name, ethAmount, nameAndIntMax.intmax_address);
+            if (result.success) {
+                console.log(`✅ ETH received flow completed successfully!`);
+                console.log(`   🌐 Master INTMAX Address: ${result.intMaxAddress}`);
+                console.log(`   💰 Amount: ${result.amount} ETH`);
+                console.log(`   🔗 Deposit Tx Hash: ${result.txHash}`);
+            } else {
+                console.log(`❌ ETH received flow failed: ${result.error}`);
+            }
+        } catch (error) {
+            console.error(`❌ Error during ETH received flow:`, error);
+        }
+    }
 }
 
 // Start monitoring function
@@ -437,6 +483,203 @@ app.get('/api/monitoring-status', async (req, res) => {
     }
 });
 
+// Add endpoint to get full monitoring details with text records
+app.get('/api/monitoring-details', async (req, res) => {
+    try {
+        const response: NameData[] = await ns.getNames({
+            domain: mainDomain
+        });
+
+        const detailedAddresses = response.map(nameData => ({
+            name: nameData.name,
+            subdomain: `${nameData.name}.${mainDomain}`,
+            ethereum_address: nameData.address,
+            intmax_address: nameData.text_records?.description || 'Not set',
+            text_records: nameData.text_records,
+            etherscan: `https://sepolia.etherscan.io/address/${nameData.address}`
+        }));
+
+        res.json(createApiResponse({
+            monitoring: true,
+            network: 'sepolia',
+            domain: mainDomain,
+            addresses_count: detailedAddresses.length,
+            addresses: detailedAddresses,
+            last_updated: new Date().toISOString()
+        }));
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get monitoring details',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date()
+        });
+    }
+});
+
+// INTMAX endpoints
+app.post('/api/intmax/deposit', async (req, res) => {
+    try {
+        const { parameter, amount, intmax_address } = req.body;
+
+        if (!parameter || !amount) {
+            return res.status(400).json({
+                success: false,
+                error: 'Parameter and amount are required',
+                timestamp: new Date()
+            });
+        }
+
+        let targetIntMaxAddress = intmax_address;
+
+        // If intmax_address not provided, try to get it from registered names
+        if (!targetIntMaxAddress) {
+            const nameAndIntMax = await findNameAndIntMaxForAddress(
+                deriveKeyFromParameter(parameter)
+            );
+
+            if (nameAndIntMax && nameAndIntMax.intmax_address) {
+                targetIntMaxAddress = nameAndIntMax.intmax_address;
+            } else {
+                return res.status(400).json({
+                    success: false,
+                    error: 'INTMAX address not found. Please provide intmax_address or register the name first.',
+                    timestamp: new Date()
+                });
+            }
+        }
+
+        const depositResult = await depositToIntMax(parameter, amount, targetIntMaxAddress);
+
+        if (depositResult.success) {
+            res.json(createApiResponse({
+                message: 'INTMAX deposit successful',
+                ...depositResult
+            }));
+        } else {
+            res.status(500).json({
+                success: false,
+                error: depositResult.error,
+                timestamp: new Date()
+            });
+        }
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Failed to deposit to INTMAX',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date()
+        });
+    }
+});
+
+app.get('/api/intmax/balances/:parameter', async (req, res) => {
+    try {
+        const { parameter } = req.params;
+
+        const balances = await getIntMaxBalances(parameter);
+
+        res.json(createApiResponse({
+            parameter,
+            balances
+        }));
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get INTMAX balances',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date()
+        });
+    }
+});
+
+app.get('/api/intmax/deposits/:parameter', async (req, res) => {
+    try {
+        const { parameter } = req.params;
+
+        const deposits = await getDepositHistory(parameter);
+
+        res.json(createApiResponse({
+            parameter,
+            deposits
+        }));
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get INTMAX deposit history',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date()
+        });
+    }
+});
+
+app.get('/api/intmax/transfers/:parameter', async (req, res) => {
+    try {
+        const { parameter } = req.params;
+
+        const transfers = await getTransferHistory(parameter);
+
+        res.json(createApiResponse({
+            parameter,
+            transfers
+        }));
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get INTMAX transfer history',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date()
+        });
+    }
+});
+
+// Debug endpoint to check master INTMAX account
+app.get('/api/debug/master-account', async (req, res) => {
+    try {
+        const { loginToIntMax } = await import('./intmax-helper');
+
+        // Login as master (using PRIVATE_KEY directly)
+        const masterPrivateKey = process.env.PRIVATE_KEY;
+        if (!masterPrivateKey) {
+            throw new Error('PRIVATE_KEY not found');
+        }
+
+        const { IntMaxNodeClient } = await import('intmax2-server-sdk');
+        const formattedPrivateKey = masterPrivateKey.startsWith('0x') ? masterPrivateKey : `0x${masterPrivateKey}`;
+
+        const masterClient = new IntMaxNodeClient({
+            environment: 'testnet',
+            eth_private_key: formattedPrivateKey as `0x${string}`,
+            l1_rpc_url: 'https://sepolia.gateway.tenderly.co',
+        });
+
+        await masterClient.login();
+        const masterAddress = masterClient.address;
+
+        // Get balances
+        const { balances } = await masterClient.fetchTokenBalances();
+
+        // Get deposits
+        const deposits = await masterClient.fetchDeposits({});
+
+        await masterClient.logout();
+
+        res.json(createApiResponse({
+            master_intmax_address: masterAddress,
+            balances: balances,
+            recent_deposits: deposits.slice(0, 5),
+            ethereum_address: getDerivedAddress('master') // This would be your base ETH address
+        }));
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get master account info',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date()
+        });
+    }
+});
+
 // Start server
 app.listen(PORT, () => {
     console.log(`🚀 Server is running on port ${PORT}`);
@@ -446,7 +689,15 @@ app.listen(PORT, () => {
     console.log(`   POST http://localhost:${PORT}/api/register`);
     console.log(`   GET http://localhost:${PORT}/api/names`);
     console.log(`   GET http://localhost:${PORT}/api/monitoring-status`);
+    console.log(`   GET http://localhost:${PORT}/api/monitoring-details`);
     console.log(`   POST http://localhost:${PORT}/api/derive-address`);
+    console.log(`\n💰 INTMAX endpoints:`);
+    console.log(`   POST http://localhost:${PORT}/api/intmax/deposit`);
+    console.log(`   GET http://localhost:${PORT}/api/intmax/balances/:parameter`);
+    console.log(`   GET http://localhost:${PORT}/api/intmax/deposits/:parameter`);
+    console.log(`   GET http://localhost:${PORT}/api/intmax/transfers/:parameter`);
+    console.log(`\n🐛 Debug endpoints:`);
+    console.log(`   GET http://localhost:${PORT}/api/debug/master-account`);
 
     // Start monitoring ETH transfers
     setTimeout(startMonitoring, 2000); // Small delay to ensure server is ready
