@@ -282,17 +282,6 @@ export async function handleEthReceived(
         console.log(`💰 Derived client depositing ${ethAmountFloat} ETH to master (${masterIntMaxAddress})...`);
         console.log(`🔍 DEBUG: Deposit params:`, JSON.stringify(depositParams, null, 2));
 
-        // Estimate gas first
-        try {
-            const gasEstimate = await derivedClient.estimateDepositGas({
-                ...depositParams,
-                isGasEstimation: true,
-            });
-            console.log('⛽ Gas estimate:', gasEstimate);
-        } catch (gasError) {
-            console.error('❌ Gas estimation failed:', gasError);
-            console.log('⚠️ Proceeding without gas estimation...');
-        }
 
         // Execute deposit
         const depositResult = await derivedClient.deposit(depositParams);

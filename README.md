@@ -70,4 +70,4 @@ npm start
 - **Multi-stage Docker build**: Optimized production image
 - **Security**: Non-root user in container
 - **Lightweight**: Alpine Linux base for smaller image size
-- **Health Checks**: Built-in health monitoring endpoint # substream
+- **ThisProjecIsntSerious**

@@ -218,7 +218,7 @@ async function startMonitoring() {
     // Listen for new blocks
     client.watchBlocks({
         onBlock: async (block) => {
-            console.log(`📦 New block: ${block.number} (${new Date().toISOString()})`);
+
 
             try {
                 // Get full block with transactions
