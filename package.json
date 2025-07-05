@@ -1,0 +1,30 @@
+{
+    "name": "typescript-docker-hello",
+    "version": "1.0.0",
+    "description": "testingstuff",
+    "main": "dist/index.js",
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "dev": "ts-node src/index.ts"
+    },
+    "dependencies": {
+        "@namestone/namestone-sdk": "^0.2.15",
+        "dotenv": "^16.0.0",
+        "express": "^4.18.0",
+        "viem": "^2.31.7"
+    },
+    "devDependencies": {
+        "@types/express": "^4.17.0",
+        "@types/node": "^20.0.0",
+        "ts-node": "^10.9.0",
+        "typescript": "^5.0.0"
+    },
+    "keywords": [
+        "typescript",
+        "docker",
+        "hello-world"
+    ],
+    "author": "",
+    "license": "MIT"
+}
