@@ -1,5 +1,5 @@
 # Use Node.js official image as base
-FROM node:18-alpine AS builder
+FROM --platform=linux/amd64 node:18-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -21,10 +21,7 @@ RUN npm run build
 RUN ls -la ./dist/
 
 # Production stage
-FROM node:18-alpine AS production
-
-# Install curl for health checks
-RUN apk add --no-cache curl
+FROM --platform=linux/amd64 node:18-alpine AS production
 
 # Set working directory
 WORKDIR /app
@@ -59,10 +56,6 @@ ENV PORT=3000
 
 # Expose port
 EXPOSE 3000
-
-# Add health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/health || exit 1
 
 # Command to run the application
 CMD ["npm", "start"] 
