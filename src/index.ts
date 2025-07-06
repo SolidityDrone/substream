@@ -41,6 +41,12 @@ interface NameAddressPair {
     address: string;
 }
 
+interface NameIntMaxData {
+    name: string;
+    intmax_address: string;
+    nonce: number;
+}
+
 // Helper function
 function createGreeting(message: string): Greeting {
     return {
@@ -124,7 +130,28 @@ async function updateMonitoredAddresses() {
         response.forEach((nameData, index) => {
             console.log(`\n${index + 1}. ${nameData.name}.${mainDomain}`);
             console.log(`   📍 Ethereum Address: ${nameData.address}`);
-            console.log(`   🌐 INTMAX Address: ${nameData.text_records?.description || 'Not set'}`);
+
+            // Parse description to get intmax_address and nonce
+            if (nameData.text_records?.description) {
+                try {
+                    const descriptionData = JSON.parse(nameData.text_records.description);
+                    if (descriptionData.intmax_address) {
+                        console.log(`   🌐 INTMAX Address: ${descriptionData.intmax_address}`);
+                        console.log(`   🔢 Nonce: ${descriptionData.nonce || 0}`);
+                    } else {
+                        console.log(`   🌐 INTMAX Address: ${nameData.text_records.description}`);
+                        console.log(`   🔢 Nonce: 0 (legacy format)`);
+                    }
+                } catch (jsonError) {
+                    // Legacy format - just intmax_address string
+                    console.log(`   🌐 INTMAX Address: ${nameData.text_records.description}`);
+                    console.log(`   🔢 Nonce: 0 (legacy format)`);
+                }
+            } else {
+                console.log(`   🌐 INTMAX Address: Not set`);
+                console.log(`   🔢 Nonce: 0`);
+            }
+
             console.log(`   🔗 Etherscan: https://sepolia.etherscan.io/address/${nameData.address}`);
         });
 
@@ -152,16 +179,31 @@ function checkTransactionForMonitoredAddresses(tx: any) {
 }
 
 // Function to find name and intmax address for ethereum address
-async function findNameAndIntMaxForAddress(address: string): Promise<{ name: string; intmax_address: string } | null> {
+async function findNameAndIntMaxForAddress(address: string): Promise<NameIntMaxData | null> {
     try {
         const response: NameData[] = await ns.getNames({ domain: mainDomain });
         const nameData = response.find(n => n.address.toLowerCase() === address.toLowerCase());
 
         if (nameData && nameData.text_records && nameData.text_records.description) {
-            return {
-                name: nameData.name,
-                intmax_address: nameData.text_records.description
-            };
+            try {
+                // Try to parse as JSON first (new format)
+                const descriptionData = JSON.parse(nameData.text_records.description);
+                if (descriptionData.intmax_address) {
+                    return {
+                        name: nameData.name,
+                        intmax_address: descriptionData.intmax_address,
+                        nonce: descriptionData.nonce || 0
+                    };
+                }
+            } catch (jsonError) {
+                // If JSON parsing fails, treat as old format (just intmax_address string)
+                console.log(`⚠️ Legacy format detected for ${nameData.name}, treating as intmax_address with nonce 0`);
+                return {
+                    name: nameData.name,
+                    intmax_address: nameData.text_records.description,
+                    nonce: 0
+                };
+            }
         }
 
         return null;
@@ -189,6 +231,7 @@ async function logEthReceived(tx: any, ethAmount: string) {
     if (nameAndIntMax) {
         console.log(`🚀 Initiating ETH received flow for ${nameAndIntMax.name}...`);
         console.log(`   🎯 User INTMAX Address: ${nameAndIntMax.intmax_address}`);
+        console.log(`   🔢 Current Nonce: ${nameAndIntMax.nonce}`);
         try {
             const result = await handleEthReceived(nameAndIntMax.name, ethAmount, nameAndIntMax.intmax_address);
             if (result.success) {
@@ -301,11 +344,17 @@ app.post('/api/register', async (req, res) => {
         const derivedAddress = deriveKeyFromParameter(subname);
         console.log('🔑 Derived address:', derivedAddress);
 
+        // Create JSON description with intmax_address and nonce (starting at 0 for new registrations)
+        const descriptionData = {
+            intmax_address: intmax_address,
+            nonce: 0
+        };
+
         const textRecords: TextRecords = {
             "com.twitter": "substream",
             "com.github": "substream",
             "url": "https://www.substream.xyz",
-            "description": intmax_address,
+            "description": JSON.stringify(descriptionData),
             "avatar": "https://imagedelivery.net/UJ5oN2ajUBrk2SVxlns2Aw/e52988ee-9840-48a2-d8d9-8a92594ab200/public"
         };
 
@@ -678,6 +727,22 @@ app.get('/api/debug/master-account', async (req, res) => {
             timestamp: new Date()
         });
     }
+});
+
+// Health check endpoint for Docker
+app.get('/health', (req: Request, res: Response) => {
+    res.status(200).json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        service: 'stealthmax-substream',
+        version: '1.0.0'
+    });
+});
+
+// Basic info endpoint
+app.get('/', (req: Request, res: Response) => {
+    res.json(createGreeting('🚀 StealthMax Substream API - Ready for ETH monitoring and INTMAX deposits!'));
 });
 
 // Start server

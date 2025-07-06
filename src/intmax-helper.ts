@@ -3,6 +3,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { keccak256, encodePacked, parseEther } from 'viem';
 import dotenv from 'dotenv';
 import { webcrypto } from 'crypto';
+import NameStone, { NameData, TextRecords } from "@namestone/namestone-sdk";
 
 // Polyfill crypto for Node.js
 if (typeof globalThis.crypto === 'undefined') {
@@ -10,6 +11,14 @@ if (typeof globalThis.crypto === 'undefined') {
 }
 
 dotenv.config();
+
+// Initialize Namestone SDK
+const apiKey = process.env.NAMESTONE_API_KEY;
+if (!apiKey) {
+    throw new Error('NAMESTONE_API_KEY environment variable is required');
+}
+const ns = new NameStone(apiKey);
+const mainDomain = "stealthmax.eth";
 
 // Interface for INTMAX operations
 export interface IntMaxDeposit {
@@ -45,6 +54,106 @@ export function getDerivedAddress(parameter: string): string {
     const derivedKey = derivePrivateKeyFromParameter(parameter);
     const account = privateKeyToAccount(derivedKey);
     return account.address;
+}
+
+// Function to derive address from parameter + nonce
+function deriveAddressFromParameterAndNonce(parameter: string, nonce: number): string {
+    const privateKey = process.env.PRIVATE_KEY;
+    if (!privateKey) {
+        throw new Error('PRIVATE_KEY environment variable is required');
+    }
+
+    // Ensure private key has 0x prefix
+    const formattedPrivateKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+
+    // Create a deterministic derived key by hashing the original key with the parameter AND nonce
+    const derivationData = encodePacked(
+        ['bytes32', 'string', 'uint256'],
+        [formattedPrivateKey as `0x${string}`, parameter, BigInt(nonce)]
+    );
+
+    const derivedKey = keccak256(derivationData);
+
+    // Create account from derived key and return its address
+    const account = privateKeyToAccount(derivedKey);
+    return account.address;
+}
+
+// Function to update subdomain after successful deposit
+export async function updateSubdomainAfterDeposit(subdomainName: string): Promise<void> {
+    try {
+        console.log(`\n🔄 UPDATING SUBDOMAIN AFTER DEPOSIT: ${subdomainName}.${mainDomain}`);
+
+        // Get current subdomain data
+        const response: NameData[] = await ns.getNames({ domain: mainDomain });
+        const currentData = response.find(n => n.name === subdomainName);
+
+        if (!currentData) {
+            throw new Error(`Subdomain ${subdomainName} not found`);
+        }
+
+        // Parse current description to get nonce
+        let currentNonce = 0;
+        let intmaxAddress = '';
+
+        if (currentData.text_records?.description) {
+            try {
+                const descriptionData = JSON.parse(currentData.text_records.description);
+                currentNonce = descriptionData.nonce || 0;
+                intmaxAddress = descriptionData.intmax_address || '';
+            } catch (jsonError) {
+                // Legacy format - treat as intmax_address with nonce 0
+                intmaxAddress = currentData.text_records.description;
+                currentNonce = 0;
+            }
+        }
+
+        console.log(`🔢 Current nonce: ${currentNonce}`);
+        console.log(`🌐 Current INTMAX address: ${intmaxAddress}`);
+
+        // Derive new address using subdomain + current nonce
+        const newDerivedAddress = deriveAddressFromParameterAndNonce(subdomainName, currentNonce);
+        console.log(`🔑 New derived address: ${newDerivedAddress}`);
+
+        // Increment nonce for next time
+        const newNonce = currentNonce + 1;
+        console.log(`🔢 New nonce: ${newNonce}`);
+
+        // Create updated description with incremented nonce
+        const updatedDescriptionData = {
+            intmax_address: intmaxAddress,
+            nonce: newNonce
+        };
+
+        const textRecords: TextRecords = {
+            "com.twitter": "substream",
+            "com.github": "substream",
+            "url": "https://www.substream.xyz",
+            "description": JSON.stringify(updatedDescriptionData),
+            "avatar": "https://imagedelivery.net/UJ5oN2ajUBrk2SVxlns2Aw/e52988ee-9840-48a2-d8d9-8a92594ab200/public"
+        };
+
+        // Update the subdomain to resolve to the new address
+        console.log(`📤 Updating subdomain to resolve to new address...`);
+        const updateResponse = await ns.setName({
+            name: subdomainName,
+            domain: mainDomain,
+            address: newDerivedAddress,
+            text_records: textRecords
+        });
+
+        console.log(`✅ Subdomain updated successfully!`);
+        console.log(`📋 Updated subdomain details:`);
+        console.log(`   📛 Name: ${subdomainName}.${mainDomain}`);
+        console.log(`   📍 Ethereum Address: ${newDerivedAddress}`);
+        console.log(`   🌐 INTMAX Address: ${intmaxAddress}`);
+        console.log(`   🔢 Nonce: ${newNonce}`);
+        console.log(`   🔗 Etherscan: https://sepolia.etherscan.io/address/${newDerivedAddress}`);
+
+    } catch (error) {
+        console.error(`❌ Error updating subdomain after deposit:`, error);
+        throw error;
+    }
 }
 
 // Function to create INTMAX client with derived private key
@@ -261,15 +370,17 @@ export async function handleEthReceived(
         console.log('\n📋 STEP 5: Derived client deposits ETH to master...');
         const decimals = ethToken.decimals || 18;
 
-        // Use a more precise number format to avoid BigInt conversion issues
-        // Convert to wei as integer, then back to a clean decimal number
+        // Use precise calculation to avoid floating point precision issues
         const weiAmount = Math.round(ethAmountFloat * Math.pow(10, decimals));
-        const cleanAmount = weiAmount / Math.pow(10, decimals);
+
+        // Ensure we're working with a safe integer
+        if (!Number.isSafeInteger(weiAmount)) {
+            console.warn(`⚠️ WARNING: Wei amount ${weiAmount} exceeds safe integer limits`);
+        }
 
         console.log(`🔍 DEBUG: Original amount: ${ethAmountFloat} ETH`);
         console.log(`🔍 DEBUG: Wei amount: ${weiAmount}`);
-        console.log(`🔍 DEBUG: Wei amount as string: ${weiAmount.toString()}`);
-        console.log(`🔍 DEBUG: Clean amount: ${cleanAmount}`);
+        console.log(`🔍 DEBUG: Is safe integer: ${Number.isSafeInteger(weiAmount)}`);
         console.log(`🔍 DEBUG: Token decimals: ${decimals}`);
 
         const depositParams = {
@@ -282,34 +393,52 @@ export async function handleEthReceived(
         console.log(`💰 Derived client depositing ${ethAmountFloat} ETH to master (${masterIntMaxAddress})...`);
         console.log(`🔍 DEBUG: Deposit params:`, JSON.stringify(depositParams, null, 2));
 
+        // Execute deposit with try-catch to continue even if deposit fails
+        let depositResult = null;
+        let depositSuccess = false;
 
-        // Execute deposit
-        const depositResult = await derivedClient.deposit(depositParams);
-        console.log('✅ Deposit to master successful:', depositResult);
-
-        // Check deposit status and pending transactions
         try {
-            console.log(`🔍 Checking deposit status...`);
-            const deposits = await derivedClient.fetchDeposits({});
-            console.log(`📋 Recent deposits from derived client:`, deposits.slice(0, 3));
+            depositResult = await derivedClient.deposit(depositParams);
+            console.log('✅ Deposit to master successful:', depositResult);
+            depositSuccess = true;
 
-            const pendingDeposits = deposits.filter((d: any) => d.status === 1 || d.status === 'pending');
-            console.log(`⏳ Pending deposits from derived client: ${pendingDeposits.length}`);
+            // Check deposit status and pending transactions
+            try {
+                console.log(`🔍 Checking deposit status...`);
+                const deposits = await derivedClient.fetchDeposits({});
+                console.log(`📋 Recent deposits from derived client:`, deposits.slice(0, 3));
 
-            if (pendingDeposits.length > 0) {
-                console.log(`📋 Pending deposits details:`, pendingDeposits);
+                const pendingDeposits = deposits.filter((d: any) => d.status === 1 || d.status === 'pending');
+                console.log(`⏳ Pending deposits from derived client: ${pendingDeposits.length}`);
+
+                if (pendingDeposits.length > 0) {
+                    console.log(`📋 Pending deposits details:`, pendingDeposits);
+                }
+            } catch (depositCheckError) {
+                console.error(`❌ Error checking deposit status:`, depositCheckError);
             }
-        } catch (depositCheckError) {
-            console.error(`❌ Error checking deposit status:`, depositCheckError);
+        } catch (depositError) {
+            console.error(`❌ Deposit failed (but continuing with subdomain update):`, depositError);
+            console.log(`⚠️ This is expected if IntMax is down - continuing with subdomain update anyway...`);
         }
 
-        // STEP 6: Logout derived client
+        // STEP 6: Update subdomain after successful deposit
+        console.log('\n📋 STEP 6: Update subdomain after successful deposit...');
+        try {
+            await updateSubdomainAfterDeposit(parameter);
+            console.log('✅ Subdomain updated successfully after deposit');
+        } catch (subdomainUpdateError) {
+            console.error(`❌ Error updating subdomain after deposit:`, subdomainUpdateError);
+            // Don't throw here - we want to continue even if subdomain update fails
+        }
+
+        // STEP 7: Logout derived client
         await derivedClient.logout();
         console.log('✅ Derived client logged out');
 
         return {
-            success: true,
-            txHash: depositResult.txHash,
+            success: depositSuccess,
+            txHash: depositResult?.txHash || 'N/A - deposit failed',
             intMaxAddress: masterIntMaxAddress,
             amount: ethAmount,
         };
