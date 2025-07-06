@@ -12,11 +12,7 @@ import { sepolia } from 'viem/chains';
 import {
     handleEthReceived,
     depositToIntMax,
-    loginToIntMax,
     getIntMaxBalances,
-    getDepositHistory,
-    getTransferHistory,
-    getDerivedAddress
 } from './intmax-helper';
 
 
@@ -636,93 +632,6 @@ app.get('/api/intmax/balances/:parameter', async (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Failed to get INTMAX balances',
-            message: error instanceof Error ? error.message : 'Unknown error',
-            timestamp: new Date()
-        });
-    }
-});
-
-app.get('/api/intmax/deposits/:parameter', async (req, res) => {
-    try {
-        const { parameter } = req.params;
-
-        const deposits = await getDepositHistory(parameter);
-
-        res.json(createApiResponse({
-            parameter,
-            deposits
-        }));
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get INTMAX deposit history',
-            message: error instanceof Error ? error.message : 'Unknown error',
-            timestamp: new Date()
-        });
-    }
-});
-
-app.get('/api/intmax/transfers/:parameter', async (req, res) => {
-    try {
-        const { parameter } = req.params;
-
-        const transfers = await getTransferHistory(parameter);
-
-        res.json(createApiResponse({
-            parameter,
-            transfers
-        }));
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get INTMAX transfer history',
-            message: error instanceof Error ? error.message : 'Unknown error',
-            timestamp: new Date()
-        });
-    }
-});
-
-// Debug endpoint to check master INTMAX account
-app.get('/api/debug/master-account', async (req, res) => {
-    try {
-        const { loginToIntMax } = await import('./intmax-helper');
-
-        // Login as master (using PRIVATE_KEY directly)
-        const masterPrivateKey = process.env.PRIVATE_KEY;
-        if (!masterPrivateKey) {
-            throw new Error('PRIVATE_KEY not found');
-        }
-
-        const { IntMaxNodeClient } = await import('intmax2-server-sdk');
-        const formattedPrivateKey = masterPrivateKey.startsWith('0x') ? masterPrivateKey : `0x${masterPrivateKey}`;
-
-        const masterClient = new IntMaxNodeClient({
-            environment: 'testnet',
-            eth_private_key: formattedPrivateKey as `0x${string}`,
-            l1_rpc_url: 'https://sepolia.gateway.tenderly.co',
-        });
-
-        await masterClient.login();
-        const masterAddress = masterClient.address;
-
-        // Get balances
-        const { balances } = await masterClient.fetchTokenBalances();
-
-        // Get deposits
-        const deposits = await masterClient.fetchDeposits({});
-
-        await masterClient.logout();
-
-        res.json(createApiResponse({
-            master_intmax_address: masterAddress,
-            balances: balances,
-            recent_deposits: deposits.slice(0, 5),
-            ethereum_address: getDerivedAddress('master') // This would be your base ETH address
-        }));
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get master account info',
             message: error instanceof Error ? error.message : 'Unknown error',
             timestamp: new Date()
         });

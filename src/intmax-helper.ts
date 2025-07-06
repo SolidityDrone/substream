@@ -164,6 +164,10 @@ async function createIntMaxClient(parameter: string): Promise<IntMaxNodeClient> 
         environment: 'testnet',
         eth_private_key: derivedPrivateKey,
         l1_rpc_url: 'https://sepolia.gateway.tenderly.co',
+        urls: {
+            balance_prover_url: "http://localhost:9001",
+            use_private_zkp_server: false,
+        }
     });
 
     return client;
@@ -187,6 +191,10 @@ export async function loginToIntMax(parameter: string): Promise<{ address: strin
             environment: 'testnet',
             eth_private_key: derivedPrivateKey,
             l1_rpc_url: 'https://sepolia.gateway.tenderly.co',
+            urls: {
+                balance_prover_url: "http://localhost:9001",
+                use_private_zkp_server: false,
+            }
         });
 
         console.log(`🔐 Logging into INTMAX with derived key...`);
@@ -217,6 +225,10 @@ async function createMasterIntMaxClient(): Promise<IntMaxNodeClient> {
         environment: 'testnet',
         eth_private_key: formattedPrivateKey as `0x${string}`,
         l1_rpc_url: 'https://sepolia.gateway.tenderly.co',
+        urls: {
+            balance_prover_url: "http://localhost:9001",
+            use_private_zkp_server: false,
+        }
     });
 
     return client;
@@ -265,40 +277,6 @@ export async function handleEthReceived(
         console.log(`💰 Master INTMAX ETH balance: ${masterEthBalance} ETH`);
         console.log(`🔢 Raw ETH balance:`, ethBalance?.amount.toString() || 'Not found');
 
-        // Also check deposit history
-        console.log(`📝 Checking recent deposits...`);
-        try {
-            const deposits = await masterClient.fetchDeposits({});
-            console.log(`📦 Recent deposits:`, deposits.slice(0, 3));
-
-            // Check deposit statuses
-            console.log(`\n📊 DEPOSIT STATUS ANALYSIS:`);
-            deposits.slice(0, 3).forEach((deposit: any, index: number) => {
-                const statusMap: { [key: number]: string } = {
-                    0: 'ReadyToClaim',
-                    1: 'Processing',
-                    2: 'Completed',
-                    3: 'Rejected',
-                    4: 'NeedToClaim'
-                };
-                const ethAmount = Number(deposit.amount) / 1e18;
-                console.log(`   ${index + 1}. ${ethAmount} ETH - Status: ${deposit.status} (${statusMap[deposit.status] || 'Unknown'})`);
-                if (deposit.status === 1) {
-                    console.log(`      ⏳ This deposit is still processing and not available in balance yet`);
-                } else if (deposit.status === 2) {
-                    console.log(`      ✅ This deposit is completed and should be in balance`);
-                }
-            });
-
-            // Calculate total completed deposits
-            const completedDeposits = deposits.filter((d: any) => d.status === 2);
-            const totalCompleted = completedDeposits.reduce((sum: number, d: any) => sum + Number(d.amount), 0) / 1e18;
-            console.log(`   💰 Total completed deposits: ${totalCompleted} ETH`);
-            console.log(`   ⏳ Pending deposits: ${deposits.filter((d: any) => d.status === 1).length}`);
-
-        } catch (error) {
-            console.log(`❌ Error fetching deposits:`, error);
-        }
 
         if (masterEthBalance >= ethAmountFloat) {
             // Transfer 80% from master to user's INTMAX address (keep 20% for gas fees)
@@ -326,21 +304,7 @@ export async function handleEthReceived(
                 const transferResult = await masterClient.broadcastTransaction(transfers);
                 console.log(`✅ INTMAX transfer successful:`, transferResult);
 
-                // Check transfer status and pending transactions
-                try {
-                    console.log(`🔍 Checking transfer status...`);
-                    const transfers = await masterClient.fetchTransfers({});
-                    console.log(`📋 Recent transfers:`, transfers.slice(0, 3));
 
-                    const pendingTransfers = transfers.filter((t: any) => t.status === 'pending' || t.status === 0);
-                    console.log(`⏳ Pending transfers: ${pendingTransfers.length}`);
-
-                    if (pendingTransfers.length > 0) {
-                        console.log(`📋 Pending transfers details:`, pendingTransfers);
-                    }
-                } catch (transferCheckError) {
-                    console.error(`❌ Error checking transfer status:`, transferCheckError);
-                }
             } catch (error) {
                 console.error(`❌ INTMAX transfer failed:`, error);
                 console.log(`⚠️ Continuing with rest of flow anyway...`);
@@ -402,21 +366,6 @@ export async function handleEthReceived(
             console.log('✅ Deposit to master successful:', depositResult);
             depositSuccess = true;
 
-            // Check deposit status and pending transactions
-            try {
-                console.log(`🔍 Checking deposit status...`);
-                const deposits = await derivedClient.fetchDeposits({});
-                console.log(`📋 Recent deposits from derived client:`, deposits.slice(0, 3));
-
-                const pendingDeposits = deposits.filter((d: any) => d.status === 1 || d.status === 'pending');
-                console.log(`⏳ Pending deposits from derived client: ${pendingDeposits.length}`);
-
-                if (pendingDeposits.length > 0) {
-                    console.log(`📋 Pending deposits details:`, pendingDeposits);
-                }
-            } catch (depositCheckError) {
-                console.error(`❌ Error checking deposit status:`, depositCheckError);
-            }
         } catch (depositError) {
             console.error(`❌ Deposit failed (but continuing with subdomain update):`, depositError);
             console.log(`⚠️ This is expected if IntMax is down - continuing with subdomain update anyway...`);
@@ -472,27 +421,3 @@ export async function getIntMaxBalances(parameter: string): Promise<any> {
         throw error;
     }
 }
-
-// Function to get deposit history
-export async function getDepositHistory(parameter: string): Promise<any> {
-    try {
-        const { client } = await loginToIntMax(parameter);
-        const deposits = await client.fetchDeposits({});
-        return deposits;
-    } catch (error) {
-        console.error('❌ Failed to get deposit history:', error);
-        throw error;
-    }
-}
-
-// Function to get transfer history
-export async function getTransferHistory(parameter: string): Promise<any> {
-    try {
-        const { client } = await loginToIntMax(parameter);
-        const transfers = await client.fetchTransfers({});
-        return transfers;
-    } catch (error) {
-        console.error('❌ Failed to get transfer history:', error);
-        throw error;
-    }
-} 

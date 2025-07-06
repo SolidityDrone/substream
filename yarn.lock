@@ -547,10 +547,10 @@ inherits@2.0.4:
   resolved "https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz"
   integrity sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==
 
-intmax2-server-sdk@^1.4.1:
-  version "1.4.1"
-  resolved "https://registry.npmjs.org/intmax2-server-sdk/-/intmax2-server-sdk-1.4.1.tgz"
-  integrity sha512-L/d1iFBX9pmKBA4cOuuFkoeukOkfmlXCXt928ne1DLPsURIIO9mz6kMaF4Yspm/D/Q3U5E5d1QvAN/oxggrWGg==
+intmax2-server-sdk@^1.4.3:
+  version "1.4.3"
+  resolved "https://registry.npmjs.org/intmax2-server-sdk/-/intmax2-server-sdk-1.4.3.tgz"
+  integrity sha512-ruPKf+c+WF/9Fbij0ieu9xVQhwUHpqHrLrBz1fnCMZF8jZZ/cDYF8+v//9I2q965rrEwoFfyZ8s83DIncTQJow==
   dependencies:
     "@scure/bip32" "^1.7.0"
     "@scure/bip39" "^1.6.0"
