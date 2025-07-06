@@ -17,6 +17,9 @@ COPY . .
 # Build TypeScript
 RUN npm run build
 
+# Debug: Check if build files exist
+RUN ls -la ./dist/
+
 # Production stage
 FROM node:18-alpine AS production
 
@@ -35,6 +38,9 @@ RUN if [ -f yarn.lock ]; then yarn install --frozen-lockfile --production && yar
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
+
+# Debug: Verify files were copied correctly
+RUN ls -la ./dist/
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs
